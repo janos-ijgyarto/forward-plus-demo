@@ -6,8 +6,6 @@
 #include <memory>
 namespace ForwardPlusDemo
 {
-	
-
 	class Application;
 	class GraphicsAPI
 	{
@@ -16,18 +14,18 @@ namespace ForwardPlusDemo
 
 		D3DDevice* get_device() const;
 		D3DDeviceContext* get_device_context() const;
-
-		void begin_frame();
 	private:
 		GraphicsAPI(Application& application);
 
 		bool initialize();
-		void update(); 
+
+		void begin_frame();
+		void end_frame(); 
 
 		struct Internal;
 		std::unique_ptr<Internal> m_internal;
 
-		friend class Application;
+		friend class RenderSystem;
 	};
 }
 #endif

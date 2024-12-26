@@ -5,20 +5,18 @@
 
 #include <ForwardPlusDemo/Render/LightSystem.hpp>
 
+#include <ForwardPlusDemo/Utilities/EventQueue.hpp>
+
 #include <d3dcompiler.h>
 
 #include <DirectXCollision.h>
 
-#include <vector>
-#include <array>
+#include <thread>
 
 namespace ForwardPlusDemo
 {
 	namespace
 	{
-		constexpr float c_camera_movement_speed = 0.05f;
-		constexpr float c_camera_turn_speed = 0.01f;
-
 		// NOTE: coordinates are X,Z for horizontal coordinates, and Y for vertical (DirectXMath prefers it this way)
 		constexpr std::array<Vector3, 8> c_cube_positions = {
 			Vector3{ 0.5f, -0.5f, 0.5f  },
@@ -55,26 +53,6 @@ namespace ForwardPlusDemo
 			Vector3{ -0.5f, 0.5f, 0.0f },
 			Vector3{ 0.0f, 0.5f, -0.5f },
 		};
-
-		const XMVector c_default_forward = DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
-		const XMVector c_default_right = DirectX::XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f);
-		const XMVector c_default_up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-
-		float clamp_angle(float angle)
-		{
-			if (angle > XM_PI)
-			{
-				// Wrap around
-				return angle - DirectX::XM_2PI;
-			}
-			else if (angle < -DirectX::XM_PI)
-			{
-				// Wrap around
-				return angle + DirectX::XM_2PI;
-			}
-
-			return angle;
-		}
 
 		enum class ObjectType
 		{
@@ -115,50 +93,21 @@ namespace ForwardPlusDemo
 			XMVector position = DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 1.0f);
 			Vector2 rotation = { 0, 0 }; // Pitch & yaw
 
-			Vector3 velocity = { 0, 0, 0 };
-			Vector2 angular_velocity = { 0, 0 };
-
 			XMMatrix view;
 			XMVector forward;
 
 			CameraInfo get_info() const { return CameraInfo{ position, forward, rotation, view }; }
-
-			void update(float dt)
+						
+			void update_transform(const CameraTransformUpdate& transform_update)
 			{
-				// Rotation
-				float& pitch = rotation.x;
+				position = transform_update.position;
+				rotation = transform_update.rotation;
 
-				pitch += dt * angular_velocity.x * c_camera_turn_speed;
-				if (pitch > DirectX::XM_PIDIV2)
-				{
-					pitch = DirectX::XM_PIDIV2;
-				}
-				else if (pitch < -DirectX::XM_PIDIV2)
-				{
-					pitch = -DirectX::XM_PIDIV2;
-				}
+				const ForwardPlusDemo::XMMatrix rpy_matrix = DirectX::XMMatrixRotationRollPitchYaw(rotation.x, rotation.y, 0.0f);
+				forward = XMVector3TransformCoord(c_camera_default_forward, rpy_matrix);
 
-				float& yaw = rotation.y;
-				yaw += dt * angular_velocity.y * c_camera_turn_speed;
-				yaw = clamp_angle(yaw);
-								
-				const XMMatrix rpy_matrix = DirectX::XMMatrixRotationRollPitchYaw(pitch, yaw, 0.0f);
-				const XMVector camera_right = XMVector3TransformCoord(c_default_right, rpy_matrix);
-				forward = XMVector3TransformCoord(c_default_forward, rpy_matrix);
-
-				const XMVector camera_up = XMVector3TransformCoord(c_default_up, rpy_matrix);
-
-				const XMMatrix yaw_matrix = DirectX::XMMatrixRotationY(yaw);
-				const XMVector move_forward = XMVector3TransformCoord(c_default_forward, yaw_matrix);
-
-				position += (velocity.x * dt * c_camera_movement_speed) * camera_right;
-				position += (velocity.y * dt * c_camera_movement_speed) * c_default_up;
-				position += (velocity.z * dt * c_camera_movement_speed) * move_forward;
-
-				// Reset velocities
-				velocity = { 0, 0, 0 };
-				angular_velocity = { 0, 0 };
-
+				const ForwardPlusDemo::XMVector camera_up = XMVector3TransformCoord(ForwardPlusDemo::c_camera_default_up, rpy_matrix);
+				
 				// Compute view matrix
 				const XMVector camera_target = forward + position;
 				view = DirectX::XMMatrixLookAtLH(position, camera_target, camera_up);
@@ -177,11 +126,19 @@ namespace ForwardPlusDemo
 			Vector4 position = { 0, 0, 0, 0 };
 			Vector4 normal = { 0, 0, 0, 0 };
 		};
+
+		enum class RenderEventType : uint32_t
+		{
+			UPDATE_CAMERA_TRANSFORM,
+			TOGGLE_LIGHT_DEBUG_RENDERING
+		};
 	}
 
 	struct RenderSystem::Internal 
 	{
 		Application& m_application;
+
+		GraphicsAPI m_graphics_api;
 
 		LightSystem m_light_system;
 
@@ -199,13 +156,24 @@ namespace ForwardPlusDemo
 		CameraState m_camera;
 		XMMatrix m_projection_matrix;
 
+		std::thread m_render_thread;
+		bool m_running = true;
+		EventDoubleBuffer m_event_buffer;
+
 		Internal(Application& application)
 			: m_application(application)
+			, m_graphics_api(application)
 			, m_light_system(application)
-		{}
+		{
+		}
 
 		bool initialize()
 		{
+			if (!m_graphics_api.initialize())
+			{
+				return false;
+			}
+
 			if (!generate_objects())
 			{
 				return false;
@@ -221,7 +189,58 @@ namespace ForwardPlusDemo
 				return false;
 			}
 
+			// Start up render thread
+			m_render_thread = std::thread([this] { this->render_loop(); });
+
 			return true;
+		}
+
+		void shutdown()
+		{
+			m_running = false;
+			m_render_thread.join();
+		}
+
+		void render_loop()
+		{
+			while (m_running == true)
+			{
+				// Check for any new events from main thread
+				EventQueue* read_queue = m_event_buffer.get_read_queue();
+				if (read_queue != nullptr)
+				{
+					EventQueue::Iterator event_it = read_queue->get_iterator();
+					while (event_it.is_valid() == true)
+					{
+						const RenderEventType event_type = static_cast<RenderEventType>(event_it.get_header().event_id);
+						switch (event_type)
+						{
+						case RenderEventType::UPDATE_CAMERA_TRANSFORM:
+							update_camera(*event_it.get_event<CameraTransformUpdate>());
+							break;
+						case RenderEventType::TOGGLE_LIGHT_DEBUG_RENDERING:
+							m_light_system.toggle_debug_rendering();
+							break;
+						}
+
+						event_it.advance();
+					}
+
+					m_event_buffer.finish_read();
+				}
+
+				// Start a new render frame
+				m_graphics_api.begin_frame();
+
+				// Update lighting system
+				m_light_system.update();
+
+				// Render scene contents
+				render_scene();
+
+				// End render frame
+				m_graphics_api.end_frame();
+			}
 		}
 
 		Vector2 get_z_near_far() const
@@ -235,8 +254,7 @@ namespace ForwardPlusDemo
 
 		bool create_shaders()
 		{
-			GraphicsAPI& graphics_api = m_application.get_graphics_api();
-			ID3D11Device* d3d_device = graphics_api.get_device();
+			ID3D11Device* d3d_device = m_graphics_api.get_device();
 
 			// FIXME: revise paths, implement file lookup system so we don't hardcode source tree paths?
 			constexpr auto c_shader_path = L"source/ForwardPlusDemo/Render/Shaders/Main.hlsl";
@@ -573,8 +591,7 @@ namespace ForwardPlusDemo
 
 		bool create_buffers(const std::vector<Vertex>& vertices)
 		{
-			GraphicsAPI& graphics_api = m_application.get_graphics_api();
-			ID3D11Device* d3d_device = graphics_api.get_device();
+			ID3D11Device* d3d_device = m_graphics_api.get_device();
 
 			// Create vertex buffer
 			{
@@ -666,17 +683,32 @@ namespace ForwardPlusDemo
 			return true;
 		}
 
-		void update(float dt)
+		void update_camera(const CameraTransformUpdate& transform_update)
 		{
-			handle_input();
+			m_camera.update_transform(transform_update);
 
-			// Start a new render frame
-			GraphicsAPI& graphics_api = m_application.get_graphics_api();
-			graphics_api.begin_frame();
+			Camera shader_camera;
+			shader_camera.world_position = m_camera.position;
 
-			m_light_system.update();
+			shader_camera.view = m_camera.view;
+			shader_camera.view_projection = shader_camera.view * m_projection_matrix;
 
-			ID3D11DeviceContext* device_context = graphics_api.get_device_context();
+			D3D11_MAPPED_SUBRESOURCE mapped_subresource;
+			ZeroMemory(&mapped_subresource, sizeof(D3D11_MAPPED_SUBRESOURCE));
+
+			ID3D11DeviceContext* device_context = m_graphics_api.get_device_context();
+			const HRESULT result = device_context->Map(m_camera_buffer.Get(), 0, D3D11_MAP::D3D11_MAP_WRITE_DISCARD, 0, &mapped_subresource);
+			if (SUCCEEDED(result))
+			{
+				memcpy(mapped_subresource.pData, &shader_camera, sizeof(Camera));
+			}
+
+			device_context->Unmap(m_camera_buffer.Get(), 0);
+		}
+
+		void render_scene()
+		{
+			ID3D11DeviceContext* device_context = m_graphics_api.get_device_context();
 
 			// Set primitive topology
 			device_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -701,28 +733,6 @@ namespace ForwardPlusDemo
 				constexpr UINT c_vertex_stride = sizeof(Vertex);
 				constexpr UINT c_null_offset = 0;
 				device_context->IASetVertexBuffers(0, 1, m_vertex_buffer.GetAddressOf(), &c_vertex_stride, &c_null_offset);
-			}
-
-			// Update the camera
-			{
-				m_camera.update(dt);
-
-				Camera shader_camera;
-				shader_camera.world_position = m_camera.position;
-
-				shader_camera.view = m_camera.view;
-				shader_camera.view_projection = shader_camera.view * m_projection_matrix;
-
-				D3D11_MAPPED_SUBRESOURCE mapped_subresource;
-				ZeroMemory(&mapped_subresource, sizeof(D3D11_MAPPED_SUBRESOURCE));
-
-				const HRESULT result = device_context->Map(m_camera_buffer.Get(), 0, D3D11_MAP::D3D11_MAP_WRITE_DISCARD, 0, &mapped_subresource);
-				if (SUCCEEDED(result))
-				{
-					memcpy(mapped_subresource.pData, &shader_camera, sizeof(Camera));
-				}
-
-				device_context->Unmap(m_camera_buffer.Get(), 0);
 			}
 
 			// Create camera frustum (from projection matrix)
@@ -760,96 +770,31 @@ namespace ForwardPlusDemo
 				device_context->Draw(object_info.vertex_count, object_info.vertex_offset);
 			}
 		}
-
-		void handle_input()
-		{
-			handle_keyboard();
-			handle_mouse();
-		}
-
-		void handle_keyboard()
-		{
-			constexpr int c_keydown_flag = 0x8000;
-
-			// Camera translation
-
-			if (GetKeyState('W') & c_keydown_flag)
-			{
-				// Move forward
-				m_camera.velocity.z = 1.0f;
-			}
-			else if (GetKeyState('S') & c_keydown_flag)
-			{
-				// Move backward
-				m_camera.velocity.z = -1.0f;
-			}
-
-			if(GetKeyState('A') & c_keydown_flag)
-			{
-				// Move left
-				m_camera.velocity.x = -1.0f;
-			} 
-			else if (GetKeyState('D') & c_keydown_flag)
-			{
-				// Move right
-				m_camera.velocity.x = 1.0f;
-			}
-
-			if (GetKeyState(VK_SPACE) & c_keydown_flag)
-			{
-				// Move up
-				m_camera.velocity.y = 1.0f;
-			}
-			else if (GetKeyState(VK_LCONTROL) & c_keydown_flag)
-			{
-				// Move down
-				m_camera.velocity.y = -1.0f;
-			}
-
-			// Camera rotation
-			// FIXME: enable mouse look!
-
-			if (GetKeyState(VK_UP) & c_keydown_flag)
-			{
-				// Tilt up
-				m_camera.angular_velocity.x = 1.0f;
-			}
-			else if (GetKeyState(VK_DOWN) & c_keydown_flag)
-			{
-				// Tilt down
-				m_camera.angular_velocity.x = -1.0f;
-			}
-
-			if (GetKeyState(VK_LEFT) & c_keydown_flag)
-			{
-				// Rotate left
-				m_camera.angular_velocity.y = -1.0f;
-			}
-			else if (GetKeyState(VK_RIGHT) & c_keydown_flag)
-			{
-				// Rotate right
-				m_camera.angular_velocity.y = 1.0f;
-			}
-		}
-
-		void handle_mouse()
-		{
-			// TODO!!!
-		}
-
-		void control_input(int key_code)
-		{
-			switch (key_code)
-			{
-			case 'V':
-				// Toggle the debug rendering in the light system
-				m_light_system.toggle_debug_rendering();
-				break;
-			}
-		}
 	};
 
 	RenderSystem::~RenderSystem() = default;
+
+	GraphicsAPI& RenderSystem::get_graphics_api()
+	{
+		return m_internal->m_graphics_api;
+	}
+
+	void RenderSystem::dispatch_events()
+	{
+		m_internal->m_event_buffer.dispatch_write();
+	}
+
+	void RenderSystem::update_camera_transform(const CameraTransformUpdate& transform_update)
+	{
+		EventQueue* write_queue = m_internal->m_event_buffer.get_write_queue();
+		write_queue->write_event(static_cast<uint32_t>(RenderEventType::UPDATE_CAMERA_TRANSFORM), transform_update);
+	}
+
+	void RenderSystem::toggle_light_debug_rendering()
+	{
+		EventQueue* write_queue = m_internal->m_event_buffer.get_write_queue();
+		write_queue->write_event(static_cast<uint32_t>(RenderEventType::TOGGLE_LIGHT_DEBUG_RENDERING), 0);
+	}
 
 	CameraInfo RenderSystem::get_camera_info() const
 	{
@@ -877,13 +822,8 @@ namespace ForwardPlusDemo
 		return m_internal->initialize();
 	}
 
-	void RenderSystem::update(float dt)
+	void RenderSystem::shutdown()
 	{
-		m_internal->update(dt);
-	}
-
-	void RenderSystem::control_input(int key_code)
-	{
-		m_internal->control_input(key_code);
+		m_internal->shutdown();
 	}
 }

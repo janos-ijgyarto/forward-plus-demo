@@ -17,6 +17,10 @@ namespace ForwardPlusDemo
 	using XMVector = DirectX::XMVECTOR;
 	using XMMatrix = DirectX::XMMATRIX;
 
+	static const XMVector c_camera_default_forward = DirectX::XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+	static const XMVector c_camera_default_right = DirectX::XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f);
+	static const XMVector c_camera_default_up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
 	inline XMVector to_xmvector(const Vector3& vector)
 	{
 		return DirectX::XMLoadFloat3(&vector);
@@ -77,6 +81,22 @@ namespace ForwardPlusDemo
 	inline XMMatrix get_perspective_matrix(float fov_y, float view_width, float view_height, float near_z, float far_z)
 	{
 		return DirectX::XMMatrixPerspectiveFovLH(fov_y, view_width / view_height, near_z, far_z);
+	}
+
+	inline float clamp_angle(float angle)
+	{
+		if (angle > XM_PI)
+		{
+			// Wrap around
+			return angle - DirectX::XM_2PI;
+		}
+		else if (angle < -DirectX::XM_PI)
+		{
+			// Wrap around
+			return angle + DirectX::XM_2PI;
+		}
+
+		return angle;
 	}
 }
 #endif

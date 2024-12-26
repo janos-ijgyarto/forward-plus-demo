@@ -12,11 +12,25 @@ namespace ForwardPlusDemo
 		XMMatrix view;
 	};
 
+	struct CameraTransformUpdate
+	{
+		XMVector position;
+		Vector2 rotation;
+	};
+
 	class Application;
+	class GraphicsAPI;
 	class RenderSystem
 	{
 	public:
 		~RenderSystem();
+
+		GraphicsAPI& get_graphics_api();
+
+		void dispatch_events();
+
+		void update_camera_transform(const CameraTransformUpdate& transform_update);
+		void toggle_light_debug_rendering();
 
 		CameraInfo get_camera_info() const;
 		Vector2 get_z_near_far() const;
@@ -25,8 +39,7 @@ namespace ForwardPlusDemo
 		RenderSystem(Application& application);
 
 		bool initialize();
-		void update(float dt);
-		void control_input(int key_code);
+		void shutdown();
 
 		struct Internal;
 		std::unique_ptr<Internal> m_internal;

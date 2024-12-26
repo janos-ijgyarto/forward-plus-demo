@@ -324,7 +324,7 @@ namespace ForwardPlusDemo
 			m_device_context->OMSetDepthStencilState(m_depth_stencil_state.Get(), 1);
 		}
 
-		void update()
+		void end_frame()
 		{
 			// Assume everything has been drawn, present to the swap chain
 			m_swap_chain->Present(0, 0);
@@ -343,11 +343,6 @@ namespace ForwardPlusDemo
 		return m_internal->m_device_context.Get();
 	}
 
-	void GraphicsAPI::begin_frame()
-	{
-		m_internal->begin_frame();
-	}
-
 	GraphicsAPI::GraphicsAPI(Application& application)
 		: m_internal(std::make_unique<Internal>(application))
 	{
@@ -358,8 +353,13 @@ namespace ForwardPlusDemo
 		return m_internal->initialize();
 	}
 
-	void GraphicsAPI::update()
+	void GraphicsAPI::begin_frame()
 	{
-		m_internal->update();
+		m_internal->begin_frame();
+	}
+
+	void GraphicsAPI::end_frame()
+	{
+		m_internal->end_frame();
 	}
 }

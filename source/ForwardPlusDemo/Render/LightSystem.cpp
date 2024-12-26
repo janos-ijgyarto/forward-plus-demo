@@ -466,7 +466,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 
 			bool initialize()
 			{
-				GraphicsAPI& graphics_api = application.get_graphics_api();
+				GraphicsAPI& graphics_api = application.get_render_system().get_graphics_api();
 				ID3D11Device* d3d_device = graphics_api.get_device();
 
 				// Vertex shader
@@ -707,7 +707,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 				const uint32_t vertex_count = static_cast<uint32_t>(debug_vertices.size());
 				buffer_data();
 
-				GraphicsAPI& graphics_api = application.get_graphics_api();
+				GraphicsAPI& graphics_api = application.get_render_system().get_graphics_api();
 
 				// Set primitive topology
 				ID3D11DeviceContext* device_context = graphics_api.get_device_context();
@@ -734,7 +734,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 
 			void buffer_data()
 			{
-				GraphicsAPI& graphics_api = application.get_graphics_api();
+				GraphicsAPI& graphics_api = application.get_render_system().get_graphics_api();
 				ID3D11DeviceContext* device_context = graphics_api.get_device_context();
 
 				// Update the camera
@@ -861,7 +861,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 			// Set the UAV
 			const D3DUnorderedAccessView& current_uav = get_unordered_access_view(uav_resource);
 
-			D3DDeviceContext* d3d_context = m_application.get_graphics_api().get_device_context();
+			D3DDeviceContext* d3d_context = m_application.get_render_system().get_graphics_api().get_device_context();
 			d3d_context->CSSetShaderResources(1, static_cast<uint32_t>(srv_vector.size()), srv_vector.data());
 			d3d_context->CSSetUnorderedAccessViews(0, 1, current_uav.GetAddressOf(), nullptr);
 		}
@@ -869,7 +869,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 		void run_compute_shader(ForwardPlusComputeShader cs_type)
 		{
 			// Set the compute shader
-			D3DDeviceContext* d3d_context = m_application.get_graphics_api().get_device_context();
+			D3DDeviceContext* d3d_context = m_application.get_render_system().get_graphics_api().get_device_context();
 			d3d_context->CSSetShader(get_compute_shader(cs_type).Get(), nullptr, 0);
 
 			// Gather the resources and UAV
@@ -973,7 +973,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 
 		void set_pixel_shader_resources()
 		{
-			D3DDeviceContext* d3d_context = m_application.get_graphics_api().get_device_context();
+			D3DDeviceContext* d3d_context = m_application.get_render_system().get_graphics_api().get_device_context();
 			const D3DBuffer& forward_plus_params_cbuffer = get_constant_buffer(ForwardPlusConstantBuffer::PARAMETERS);
 			d3d_context->PSSetConstantBuffers(0, 1, forward_plus_params_cbuffer.GetAddressOf());
 
@@ -1073,6 +1073,8 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 				{
 					return false;
 				}
+
+				m_forward_plus_params.global_light.ambient = Vector3(0.1f, 0.1f, 0.1f);
 
 				m_forward_plus_params.resolution.x = window_rect.right - window_rect.left;
 				m_forward_plus_params.resolution.y = window_rect.bottom - window_rect.top;
@@ -1177,7 +1179,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 				return false;
 			}
 
-			D3DDevice* d3d_device = m_application.get_graphics_api().get_device();
+			D3DDevice* d3d_device = m_application.get_render_system().get_graphics_api().get_device();
 			if (FAILED(d3d_device->CreateComputeShader(shader_blob->GetBufferPointer(), shader_blob->GetBufferSize(), nullptr, compute_shader.ReleaseAndGetAddressOf())))
 			{
 				// TODO: error
@@ -1200,7 +1202,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 			D3D11_SUBRESOURCE_DATA resource_data;
 			ZeroMemory(&resource_data, sizeof(D3D11_SUBRESOURCE_DATA));
 
-			D3DDevice* d3d_device = m_application.get_graphics_api().get_device();
+			D3DDevice* d3d_device = m_application.get_render_system().get_graphics_api().get_device();
 			D3DBuffer& current_constant_buffer = get_constant_buffer(constant_buffer);
 
 			switch (constant_buffer)
@@ -1245,7 +1247,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 			D3D11_SUBRESOURCE_DATA resource_data;
 			ZeroMemory(&resource_data, sizeof(D3D11_SUBRESOURCE_DATA));
 
-			D3DDevice* d3d_device = m_application.get_graphics_api().get_device();
+			D3DDevice* d3d_device = m_application.get_render_system().get_graphics_api().get_device();
 			D3DBuffer& current_resource_buffer = get_shader_resource_buffer(shader_resource);
 			D3DShaderResourceView& current_resource_view = get_shader_resource_view(shader_resource);
 			D3DUnorderedAccessView& current_uav = get_unordered_access_view(shader_resource);
@@ -1483,7 +1485,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 				}
 			}
 
-			D3DDeviceContext* d3d_context = m_application.get_graphics_api().get_device_context();
+			D3DDeviceContext* d3d_context = m_application.get_render_system().get_graphics_api().get_device_context();
 
 			// Unset resources used by pixel shader (they will need to be used by the compute shaders first)
 			{
@@ -1550,7 +1552,7 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 
 		void update_buffer(const D3DBuffer& buffer, uint32_t element_size, uint32_t element_count, const void* data)
 		{
-			D3DDeviceContext* d3d_context = m_application.get_graphics_api().get_device_context();
+			D3DDeviceContext* d3d_context = m_application.get_render_system().get_graphics_api().get_device_context();
 
 			D3D11_MAPPED_SUBRESOURCE mapped_subresource;
 			ZeroMemory(&mapped_subresource, sizeof(D3D11_MAPPED_SUBRESOURCE));

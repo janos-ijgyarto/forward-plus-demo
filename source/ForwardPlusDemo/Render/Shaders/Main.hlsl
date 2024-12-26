@@ -82,7 +82,8 @@ float3 process_light(uniform LightData light_data, VertexOutput pixel, float3 vi
 
 float3 compute_lighting(VertexOutput pixel, float3 view_direction)
 {
-    float3 lighting = float3(0.0f, 0.0f, 0.0f);
+    // Start from global light ambient
+    float3 lighting = ForwardPlusParameters.global_light.ambient;
 
 	// Make sure there are visible lights to process
     if (have_visible_lights() == false)

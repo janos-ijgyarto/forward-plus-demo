@@ -8,7 +8,6 @@
 #include <memory>
 namespace ForwardPlusDemo
 {
-	class GraphicsAPI;
 	class RenderSystem;
 
 	class Application
@@ -19,7 +18,6 @@ namespace ForwardPlusDemo
 
 		int run(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow);
 
-		GraphicsAPI& get_graphics_api();
 		RenderSystem& get_render_system();
 		HWND get_window_handle();
 	private:
