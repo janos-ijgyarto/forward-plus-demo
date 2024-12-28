@@ -14,13 +14,18 @@ namespace ForwardPlusDemo
 
 		D3DDevice* get_device() const;
 		D3DDeviceContext* get_device_context() const;
+
+		void get_window_resolution(UINT& width, UINT& height);
 	private:
 		GraphicsAPI(Application& application);
 
 		bool initialize();
 
 		void begin_frame();
-		void end_frame(); 
+		void end_frame();
+
+		bool set_fullscreen_state(bool fullscreen);
+		bool resize_window(UINT width, UINT height);
 
 		struct Internal;
 		std::unique_ptr<Internal> m_internal;

@@ -6,6 +6,7 @@
 #include <ForwardPlusDemo/Render/LightSystem.hpp>
 
 #include <ForwardPlusDemo/Utilities/EventQueue.hpp>
+#include <ForwardPlusDemo/Utilities/Fence.hpp>
 
 #include <d3dcompiler.h>
 
@@ -130,7 +131,17 @@ namespace ForwardPlusDemo
 		enum class RenderEventType : uint32_t
 		{
 			UPDATE_CAMERA_TRANSFORM,
+			FENCE,
+			PAUSE,
+			RESIZE_WINDOW,
+			SET_WINDOW_FULLSCREEN_STATE,
 			TOGGLE_LIGHT_DEBUG_RENDERING
+		};
+
+		struct WindowSizeInfo
+		{
+			UINT width;
+			UINT height;
 		};
 	}
 
@@ -158,6 +169,7 @@ namespace ForwardPlusDemo
 
 		std::thread m_render_thread;
 		bool m_running = true;
+		bool m_paused = false;
 		EventDoubleBuffer m_event_buffer;
 
 		Internal(Application& application)
@@ -218,6 +230,29 @@ namespace ForwardPlusDemo
 						case RenderEventType::UPDATE_CAMERA_TRANSFORM:
 							update_camera(*event_it.get_event<CameraTransformUpdate>());
 							break;
+						case RenderEventType::FENCE:
+							wait_fence(*event_it.get_event<Fence*>());
+							break;
+						case RenderEventType::PAUSE:
+							m_paused = *event_it.get_event<bool>();
+							break;
+						case RenderEventType::RESIZE_WINDOW:
+						{
+							const WindowSizeInfo* size_info = event_it.get_event<WindowSizeInfo>();
+							if (m_graphics_api.resize_window(size_info->width, size_info->height) == false)
+							{
+								assert(false);
+							}
+						}
+							break;
+						case RenderEventType::SET_WINDOW_FULLSCREEN_STATE:
+						{
+							if (m_graphics_api.set_fullscreen_state(*event_it.get_event<bool>()) == false)
+							{
+								assert(false);
+							}
+						}
+							break;
 						case RenderEventType::TOGGLE_LIGHT_DEBUG_RENDERING:
 							m_light_system.toggle_debug_rendering();
 							break;
@@ -227,6 +262,13 @@ namespace ForwardPlusDemo
 					}
 
 					m_event_buffer.finish_read();
+				}
+
+				if (m_paused)
+				{
+					// TODO: use atomic wait to pause/unpause?
+					std::this_thread::yield();
+					continue;
 				}
 
 				// Start a new render frame
@@ -619,17 +661,12 @@ namespace ForwardPlusDemo
 			{
 				// Prepare projection matrix
 				{
-					HWND window_handle = m_application.get_window_handle();
-
-					RECT window_rect;
-					if (!GetWindowRect(window_handle, &window_rect))
-					{
-						return false;
-					}
+					UINT width, height;
+					m_graphics_api.get_window_resolution(width, height);
 
 					const Vector2 z_near_far = get_z_near_far();
 					constexpr float c_fov_y = DirectX::XMConvertToRadians(70.0f);
-					m_projection_matrix = get_perspective_matrix(c_fov_y, static_cast<float>(window_rect.right - window_rect.left), static_cast<float>(window_rect.bottom - window_rect.top), z_near_far.x, z_near_far.y);
+					m_projection_matrix = get_perspective_matrix(c_fov_y, static_cast<float>(width), static_cast<float>(height), z_near_far.x, z_near_far.y);
 				}
 
 				Camera init_camera;
@@ -704,6 +741,12 @@ namespace ForwardPlusDemo
 			}
 
 			device_context->Unmap(m_camera_buffer.Get(), 0);
+		}
+
+		void wait_fence(Fence* fence)
+		{
+			fence->signal(static_cast<uint64_t>(FenceState::WAIT_MAIN));
+			fence->wait_until(static_cast<uint64_t>(FenceState::DONE));
 		}
 
 		void render_scene()
@@ -794,6 +837,31 @@ namespace ForwardPlusDemo
 	{
 		EventQueue* write_queue = m_internal->m_event_buffer.get_write_queue();
 		write_queue->write_event(static_cast<uint32_t>(RenderEventType::TOGGLE_LIGHT_DEBUG_RENDERING), 0);
+	}
+
+	void RenderSystem::set_paused(bool paused)
+	{
+		EventQueue* write_queue = m_internal->m_event_buffer.get_write_queue();
+		write_queue->write_event(static_cast<uint32_t>(RenderEventType::PAUSE), paused);
+	}
+
+	void RenderSystem::resize_window(uint32_t width, uint32_t height)
+	{
+		EventQueue* write_queue = m_internal->m_event_buffer.get_write_queue();
+		WindowSizeInfo size_info;
+		size_info.width = width;
+		size_info.height = height;
+		write_queue->write_event(static_cast<uint32_t>(RenderEventType::RESIZE_WINDOW), size_info);
+	}
+
+	Fence* RenderSystem::create_fence()
+	{
+		Fence* fence = new Fence(static_cast<uint64_t>(FenceState::WAIT_RENDERER));
+
+		EventQueue* write_queue = m_internal->m_event_buffer.get_write_queue();
+		write_queue->write_event(static_cast<uint32_t>(RenderEventType::FENCE), fence);
+
+		return fence;
 	}
 
 	CameraInfo RenderSystem::get_camera_info() const

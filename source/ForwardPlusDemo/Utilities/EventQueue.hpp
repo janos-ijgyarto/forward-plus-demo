@@ -2,6 +2,7 @@
 #define FORWARDPLUSDEMO_UTILITIES_EVENTQUEUE_HPP
 #include <array>
 #include <vector>
+#include <atomic>
 namespace ForwardPlusDemo
 {
 	class EventQueue
@@ -87,7 +88,7 @@ namespace ForwardPlusDemo
 		std::array<EventQueue, 2> m_queues;
 		EventQueue* m_read_queue;
 		EventQueue* m_write_queue;
-		bool m_signal;
+		std::atomic<bool> m_signal;
 	};
 }
 #endif

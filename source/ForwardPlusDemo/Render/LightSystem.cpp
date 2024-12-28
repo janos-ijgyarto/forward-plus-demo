@@ -1065,19 +1065,8 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 			}
 
 			// Initialize some of our constants (these won't change at runtime)
-			{
-				HWND window_handle = m_application.get_window_handle();
-
-				RECT window_rect;
-				if (!GetWindowRect(window_handle, &window_rect))
-				{
-					return false;
-				}
-
+			{				
 				m_forward_plus_params.global_light.ambient = Vector3(0.1f, 0.1f, 0.1f);
-
-				m_forward_plus_params.resolution.x = window_rect.right - window_rect.left;
-				m_forward_plus_params.resolution.y = window_rect.bottom - window_rect.top;
 
 				RenderSystem& render_system = m_application.get_render_system();
 				const Vector2 z_near_far = render_system.get_z_near_far();
@@ -1368,6 +1357,15 @@ float4 pixel_shader(PS_INPUT input) : SV_Target
 			update_lights();
 
 			m_debug_render.render();
+
+			// Update parameters
+			// FIXME: should not tie to window resolution, use separate RT!
+			{
+				UINT width, height;
+				m_application.get_render_system().get_graphics_api().get_window_resolution(width, height);
+				m_forward_plus_params.resolution.x = width;
+				m_forward_plus_params.resolution.y = height;
+			}
 
 			// Update camera
 			RenderSystem& render_system = m_application.get_render_system();

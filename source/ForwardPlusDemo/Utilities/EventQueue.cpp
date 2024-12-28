@@ -33,6 +33,12 @@ namespace ForwardPlusDemo
 			return;
 		}
 
+		if (m_write_queue->is_empty() == true)
+		{
+			// Nothing to dispatch
+			return;
+		}
+
 		// Swap buffers
 		EventQueue* read_queue = m_read_queue;
 		m_read_queue = m_write_queue;
